@@ -9,6 +9,13 @@ from pydantic import BaseModel
 from DetectSegment.pipelines.detect_and_segment import DetectAndSegmentPipeline
 from DetectSegment.utils.io_utils import load_image
 
+import UserPromptProcess.chat  # ensure chat module is loaded
+from UserPromptProcess.chat import suggest_classes, chat_answer
+
+import torch
+from transformers import Sam3Processor, Sam3Model
+from PIL import Image
+
 """FastAPI application for Detect + Segment + Chat reasoning."""
 
 # Optional chat module import
@@ -121,7 +128,7 @@ def predict_for_class(image: Image.Image, class_name: str,
 
 def overlay_masks_with_labels(image: Image.Image,
                               masks: torch.Tensor,
-                              labels: Optional[List[str]] = None) -> Image.Image:
+                              labels: List[str]) -> Image.Image:
     """
     Overlay colored masks and bounding boxes with labels on the image.
     """
@@ -227,16 +234,13 @@ async def segment_image(
 
     # Save uploaded image
     img_bytes = await image.read()
+    img_pillow = Image.open(BytesIO(img_bytes)).convert("RGB")
     tmp_img_path = OUTPUTS_DIR / f"upload_{image.filename}"
     with open(tmp_img_path, "wb") as f:
         f.write(img_bytes)
 
     # Refine classes using LLM with image context
-    refined_classes = []
-    try:
-        refined_classes = generate_classes_with_llm(chat_hist, proposed_classes, str(tmp_img_path))
-    except Exception:
-        refined_classes = list(proposed_classes)
+    refined_classes = suggest_classes(str(tmp_img_path), chat_hist, proposed_classes)
 
     # Persist refined classes JSON
     classes_path = str(tmp_img_path) + ".classes.json"
@@ -244,19 +248,17 @@ async def segment_image(
     with open(classes_path, "w", encoding="utf-8") as f:
         json.dump({"classes": refined_classes}, f, ensure_ascii=False, indent=2)
 
-    # Run pipeline
-    pipeline = build_pipeline()
-    result = pipeline.run(str(tmp_img_path), classes_path, str(OUTPUTS_DIR))
-    result["input"]["classes"] = refined_classes
+    image_masked = process_image_with_class_list(img_pillow, refined_classes)
 
     # Generate chat answer (LLM-based, fallback handled internally)
-    try:
-        chat_answer = generate_chat_answer(chat_hist, refined_classes, str(tmp_img_path), result)
-    except Exception:
-        chat_answer = "Nie udało się wygenerować odpowiedzi chatu."
+    chat_response = chat_answer(
+        chat_hist,
+        refined_classes,
+        image_masked,
+    )
 
     return {
-        "chat_answer": chat_answer,
+        "chat_answer": chat_response,
         "detect_segment": result,
         "proposed_classes": proposed_classes,
         "refined_classes": refined_classes,
