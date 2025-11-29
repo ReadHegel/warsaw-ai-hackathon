@@ -28,14 +28,16 @@ export const Chat = () => {
     const [mess, setMess] = useState('');
     const [chatSize, setChatSize] = useState<1|3>(1);
     const [status, setStatus] = useState<"loading" | "idle">("idle");
+    const [chatId, setChatId] = useState<string|null>(null);
 
     const params = useParams();
 
     const sendMessage = async() => {
         setStatus("loading");
+        const userMess = mess;
         setChat((curr) => [...curr, {
             role: "user",
-            content: mess
+            content: userMess
         }]);
         setMess('');
         const {content} = await new Promise<{content: string}>((res) => {
@@ -50,6 +52,26 @@ export const Chat = () => {
             role: "assistant",
             content
         }]);
+        let baseId = chatId;
+        if(chatId === null){
+            const res = await axios.post('/localApi/createNewConv');
+            const newChatId = res.data.newId.replaceAll("\"", '');
+            console.log(newChatId);
+            setChatId(newChatId); 
+            baseId = newChatId;
+        }
+        const saveData = await axios.post('/localApi/saveConvToDb', {
+            assistantMess: content,
+            userMess,
+            baseId
+        }, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        window.history.pushState({}, "", `/chat/${baseId}`);
+        
     }
 
     const loadConversation = async(baseId: string) => {
@@ -74,6 +96,7 @@ export const Chat = () => {
     useEffect(() => {
         console.log(params.chatId);
         if(params.chatId && params.chatId.split('-').length === 2){
+            setChatId(params.chatId);
             loadConversation(params.chatId);
         }
     }, [params]);
