@@ -115,7 +115,7 @@ export const Chat = () => {
                 </ChatUserInputWrapper>
             </ChatSectionContainer>
             <ImageHiding onTrigger={triggerLayoutShift}/>
-            <ImageDisplay />
+            <ImageDisplay showControls={chatSize === 1} />
         </ChatWrapper>
     )
 }

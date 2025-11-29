@@ -4,7 +4,13 @@ import DUMMY_OVERLAY from '../../assets/shrek2.png';
 import { Box, Stack, Switch, Typography } from "@mui/material";
 import { useState } from "react";
 
-export const ImageDisplay = () => {
+interface ImageDisplayProps {
+    showControls: boolean;
+}
+
+export const ImageDisplay = ({
+    showControls
+}:ImageDisplayProps) => {
 
     const [showMask, setShowMask] = useState(false);
 
@@ -22,13 +28,13 @@ export const ImageDisplay = () => {
                 }}
             />)}
         </ImageWrapper>
-        <ImageControlsWrapper>
+        {showControls && (<ImageControlsWrapper>
             <Stack direction="row" alignItems="center">
                 <Typography variant="body1" color="primary">
                     Show mask
                 </Typography>
                 <Switch onChange={(e) => setShowMask(e.target.checked)}/>
             </Stack>
-        </ImageControlsWrapper>
+        </ImageControlsWrapper>)}
     </ImageDisplayWrapper>
 )}

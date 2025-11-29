@@ -4,8 +4,9 @@ import styled from "styled-components";
 export const ImageDisplayWrapper = styled(Stack)`
     flex: 1;
     min-width: calc(30vw - 20px);
-    height: calc(90vh - 20px);
+    height: calc(90vh - 50px);
     padding: 10px;
+    padding-top: 40px;
     justify-content: space-between;
     align-items: center;
 `;
@@ -34,6 +35,7 @@ export const ImageControlsWrapper = styled(Box)`
     padding: 10px;
     display: flex;
     flex-direction: row;
+    justify-content: center;
     gap: 8px;
     overflow: hidden;
 `;
