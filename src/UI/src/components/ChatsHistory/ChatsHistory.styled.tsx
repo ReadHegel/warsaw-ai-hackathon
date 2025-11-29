@@ -3,8 +3,8 @@ import styled from "styled-components";
 
 export const ChatWrapper = styled(Stack)`
     width: calc(100% - 20px);
-    max-height: calc(90vh - 20px);
-    overflow-y: hidden;
+    min-height: calc(90vh - 20px);
+    height: fit-content;
     padding: 10px;
     display: flex;
     gap: 2;
