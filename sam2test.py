@@ -156,14 +156,23 @@ class GroundingDinoSam2Visualizer:
 # ------------------- Example Usage -------------------
 if __name__ == "__main__":
     pipe = GroundingDinoSam2Visualizer(
-        det_checkpoint="IDEA-Research/grounding-dino-2.0-large",
+        det_checkpoint="IDEA-Research/grounding-dino-base",
         sam_checkpoint="facebook/sam2.1-hiera-large",
         device="cuda"
     )
 
     out = pipe.run(
         "../../test_image/geoportal_ortho_5cm.jpg",
-        classes=["construcsion site with buildings, road, vehicles, containers"],
+        classes=[
+            "building",
+            "road",
+            "tree",
+            "car",
+            "waterbody",
+            "sidewalk",
+            "bicycle lane",
+            "parking lot",
+        ],
         # classes=["person", "dog", "cat", "car", "bicycle"],
         box_threshold=0.3,
         text_threshold=0.15
