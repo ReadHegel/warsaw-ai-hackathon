@@ -10,8 +10,9 @@ import {
     ChatUserMessage, 
     ChatWrapper 
 } from "./Chat.styled"
-import { Stack, Typography } from "@mui/material"
+import { Typography } from "@mui/material"
 import SendIcon from '@mui/icons-material/Send';
+import { ImageHiding } from "../ImageHiding";
 
 type Message = {
     role: 'user' | 'assistant',
@@ -49,6 +50,7 @@ export const Chat = () => {
     }]);
 
     const [mess, setMess] = useState('');
+    const [chatSize, setChatSize] = useState<1|3>(1);
 
     const sendMessage = async() => {
         setChat((curr) => [...curr, {
@@ -69,6 +71,10 @@ export const Chat = () => {
         }]);
     }
 
+    const triggerLayoutShift = () => {
+        setChatSize((curr) => curr === 3 ? 1 : 3);
+    }
+
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chat]);
@@ -80,10 +86,12 @@ export const Chat = () => {
             flexDirection: "row",
             gap: 2,
             padding: 2,
-            minHeight: "100vh",
+            minHeight: '96vh'
         })}
         >
-            <ChatSectionContainer>
+            <ChatSectionContainer style={{
+                flex: chatSize
+            }}>
                 <ChatMessagesSection>
                     {
                         chat.map((mess, ind) => mess.role === 'user' ? (
@@ -119,6 +127,7 @@ export const Chat = () => {
                     </ChatUserInputButton>
                 </ChatUserInputWrapper>
             </ChatSectionContainer>
+            <ImageHiding onTrigger={triggerLayoutShift}/>
             <ImageDisplay />
         </ChatWrapper>
     )
