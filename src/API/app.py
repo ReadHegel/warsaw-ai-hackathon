@@ -30,6 +30,13 @@ except Exception:
                 break
         return f"(Fallback) Klasy: {', '.join(classes)}. Ostatnia wiadomość: {last_user}"
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+print(f"Using device: {device}")
+
+model = Sam3Model.from_pretrained("facebook/sam3").to(device)
+processor = Sam3Processor.from_pretrained("facebook/sam3")
+model.eval()
 
 ASSETS_DIR = Path("src/images")
 OUTPUTS_DIR = Path("src/DetectSegment/tests/outputs_api")
@@ -69,6 +76,108 @@ def build_pipeline() -> DetectAndSegmentPipeline:
         sam_model_type=inferred_type,
         confidence_threshold=0.25,
     )
+
+def process_image_with_class_list(image: Image.Image, class_names: List[str],
+                              score_threshold: float = 0.5,
+                              mask_threshold: float = 0.5):
+    for class_name in class_names:
+        res = predict_for_class(image, class_name)
+        if len(res["masks"]) == 0:
+            continue
+        # res["masks"] is [N, H, W] tensor; extend as individual masks
+        all_masks.extend(list(res["masks"]))
+        all_labels.extend([class_name] * len(res["masks"]))
+
+    if len(all_masks) == 0:
+        # No masks found: return original image (or you can choose to 404)
+        overlayed = image.convert("RGBA")
+    else:
+        masks_tensor = torch.stack(all_masks, dim=0)
+        overlayed = overlay_masks_with_labels(image, masks_tensor, all_labels)
+
+    return overlayed
+
+
+def predict_for_class(image: Image.Image, class_name: str,
+                      score_threshold: float = 0.5,
+                      mask_threshold: float = 0.5):
+    """
+    Run SAM3 for a single text prompt and return post-processed results.
+    """
+    inputs = processor(images=image, text=class_name, return_tensors="pt").to(device)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    results = processor.post_process_instance_segmentation(
+        outputs,
+        threshold=score_threshold,
+        mask_threshold=mask_threshold,
+        target_sizes=inputs.get("original_sizes").tolist()
+    )[0]
+
+    return results
+
+
+def overlay_masks_with_labels(image: Image.Image,
+                              masks: torch.Tensor,
+                              labels: Optional[List[str]] = None) -> Image.Image:
+    """
+    Overlay colored masks and bounding boxes with labels on the image.
+    """
+    image = image.convert("RGBA")
+    masks_np = 255 * masks.cpu().numpy().astype(np.uint8)
+
+    n_masks = masks_np.shape[0]
+    if n_masks == 0:
+        return image  # nothing to draw
+
+    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
+    colors = [
+        tuple(int(c * 255) for c in cmap(i)[:3])
+        for i in range(n_masks)
+    ]
+
+    # Overlay masks
+    for mask, color in zip(masks_np, colors):
+        mask_img = Image.fromarray(mask)
+        overlay = Image.new("RGBA", image.size, color + (0,))
+        alpha = mask_img.point(lambda v: int(v * 0.5))
+        overlay.putalpha(alpha)
+        image = Image.alpha_composite(image, overlay)
+
+    draw = ImageDraw.Draw(image)
+
+    # Font
+    try:
+        font = ImageFont.truetype("arial.ttf", 20)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Draw bounding boxes + labels
+    for idx, (mask, color) in enumerate(zip(masks_np, colors)):
+        ys, xs = np.where(mask > 0)
+        if len(xs) == 0 or len(ys) == 0:
+            continue
+
+        x1, y1, x2, y2 = xs.min(), ys.min(), xs.max(), ys.max()
+        draw.rectangle([(x1, y1), (x2, y2)], outline=color + (255,), width=3)
+
+        label = labels[idx] if labels and idx < len(labels) else "object"
+        text = f"{label}"
+
+        text_bbox = draw.textbbox((0, 0), text, font=font)
+        tw = text_bbox[2] - text_bbox[0]
+        th = text_bbox[3] - text_bbox[1]
+
+        # text background
+        draw.rectangle(
+            [(x1, y1 - th - 4), (x1 + tw + 4, y1)],
+            fill=(0, 0, 0, 160)
+        )
+        draw.text((x1 + 2, y1 - th - 2), text, fill=(255, 255, 255), font=font)
+
+    return image
 
 
 @app.get("/images_list")

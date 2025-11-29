@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { ImageDisplay } from "../ImageDisplay"
 import { 
     ChatAssistantMessage, 
@@ -13,6 +13,8 @@ import {
 import { Typography } from "@mui/material"
 import SendIcon from '@mui/icons-material/Send';
 import { ImageHiding } from "../ImageHiding";
+import { useParams } from "react-router";
+import axios from "axios";
 
 type Message = {
     role: 'user' | 'assistant',
@@ -21,19 +23,13 @@ type Message = {
 
 export const Chat = () => {
 
-    const bottomRef = useRef<HTMLDivElement | null>(null);
-
-    const [chat, setChat] = useState<Message[]>([{
-        role: "user",
-        content: "Lorem ipsum dolor sit amet"
-    },{
-        role: "assistant",
-        content: "Lorem ipsum dolor sit amet is the answer"
-    },]);
+    const [chat, setChat] = useState<Message[]>([]);
 
     const [mess, setMess] = useState('');
     const [chatSize, setChatSize] = useState<1|3>(1);
     const [status, setStatus] = useState<"loading" | "idle">("idle");
+
+    const params = useParams();
 
     const sendMessage = async() => {
         setStatus("loading");
@@ -56,13 +52,31 @@ export const Chat = () => {
         }]);
     }
 
+    const loadConversation = async(baseId: string) => {
+        try {
+            const res = await axios.get(`/localApi/getConv/${baseId}`);
+            const data = res.data as {id: number, sender: 'user' | 'assistant', content: string}[];
+            setChat(data.map((elem) => ({role: elem.sender, content: elem.content})));
+        } catch (error){
+            console.error(error);
+        }
+    }
+
     const triggerLayoutShift = () => {
         setChatSize((curr) => curr === 3 ? 1 : 3);
     }
 
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        const buffer:HTMLElement|null = document.getElementById("printBuffer");
+        if(buffer !== null) buffer.scrollTop = buffer?.scrollHeight;
     }, [chat, status]);
+
+    useEffect(() => {
+        console.log(params.chatId);
+        if(params.chatId && params.chatId.split('-').length === 2){
+            loadConversation(params.chatId);
+        }
+    }, [params]);
 
     return (
         <ChatWrapper sx={(theme) => ({
@@ -77,9 +91,15 @@ export const Chat = () => {
             <ChatSectionContainer style={{
                 flex: chatSize
             }}>
-                <ChatMessagesSection>
+                <ChatMessagesSection id="printBuffer">
                     {
-                        chat.map((mess, ind) => mess.role === 'user' ? (
+                        chat.length === 0 ?
+                            <Typography variant="h3" align="center" sx={{
+                                color: "white"
+                            }}>
+                                Start your conversation!
+                            </Typography>
+                        : chat.map((mess, ind) => mess.role === 'user' ? (
                             <ChatUserMessage key={`mess-${ind}`}>
                                 <Typography variant='body1'>
                                     {mess.content}
@@ -94,7 +114,6 @@ export const Chat = () => {
                         ))
                     }
                     {status === "loading" && <div className="loader"/>}
-                    <div ref={bottomRef} />
                 </ChatMessagesSection>
                 <ChatUserInputWrapper direction='row'>
                     <ChatUserInput 
