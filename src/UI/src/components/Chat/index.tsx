@@ -10,8 +10,9 @@ import {
     ChatUserMessage, 
     ChatWrapper 
 } from "./Chat.styled"
-import { Stack, Typography } from "@mui/material"
+import { Typography } from "@mui/material"
 import SendIcon from '@mui/icons-material/Send';
+import { ImageHiding } from "../ImageHiding";
 
 type Message = {
     role: 'user' | 'assistant',
@@ -28,29 +29,14 @@ export const Chat = () => {
     },{
         role: "assistant",
         content: "Lorem ipsum dolor sit amet is the answer"
-    },{
-        role: "user",
-        content: "Lorem ipsum dolor sit amet"
-    },{
-        role: "assistant",
-        content: "Lorem ipsum dolor sit amet is the answer"
-    },{
-        role: "user",
-        content: "Lorem ipsum dolor sit amet"
-    },{
-        role: "assistant",
-        content: "Lorem ipsum dolor sit amet is the answer"
-    },{
-        role: "user",
-        content: "Lorem ipsum dolor sit amet"
-    },{
-        role: "assistant",
-        content: "Lorem ipsum dolor sit amet is the answer"
-    }]);
+    },]);
 
     const [mess, setMess] = useState('');
+    const [chatSize, setChatSize] = useState<1|3>(1);
+    const [status, setStatus] = useState<"loading" | "idle">("idle");
 
     const sendMessage = async() => {
+        setStatus("loading");
         setChat((curr) => [...curr, {
             role: "user",
             content: mess
@@ -59,19 +45,24 @@ export const Chat = () => {
         const {content} = await new Promise<{content: string}>((res) => {
             setTimeout(() => {
                 return res({
-                    content: "Spierdalaj"
+                    content: "Hello There!"
                 })
-            }, 1000)
+            }, 2000)
         })
+        setStatus("idle");
         setChat((curr) => [...curr, {
             role: "assistant",
             content
         }]);
     }
 
+    const triggerLayoutShift = () => {
+        setChatSize((curr) => curr === 3 ? 1 : 3);
+    }
+
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [chat]);
+    }, [chat, status]);
 
     return (
         <ChatWrapper sx={(theme) => ({
@@ -80,10 +71,12 @@ export const Chat = () => {
             flexDirection: "row",
             gap: 2,
             padding: 2,
-            minHeight: "100vh",
+            minHeight: '96vh'
         })}
         >
-            <ChatSectionContainer>
+            <ChatSectionContainer style={{
+                flex: chatSize
+            }}>
                 <ChatMessagesSection>
                     {
                         chat.map((mess, ind) => mess.role === 'user' ? (
@@ -100,6 +93,7 @@ export const Chat = () => {
                             </ChatAssistantMessage>
                         ))
                     }
+                    {status === "loading" && <div className="loader"/>}
                     <div ref={bottomRef} />
                 </ChatMessagesSection>
                 <ChatUserInputWrapper direction='row'>
@@ -114,12 +108,14 @@ export const Chat = () => {
                         onClick={sendMessage} 
                         variant="outlined"
                         endIcon={<SendIcon />}
+                        disabled={status === "loading"}
                     >
                         Send
                     </ChatUserInputButton>
                 </ChatUserInputWrapper>
             </ChatSectionContainer>
-            <ImageDisplay />
+            <ImageHiding onTrigger={triggerLayoutShift}/>
+            <ImageDisplay showControls={chatSize === 1} />
         </ChatWrapper>
     )
 }
