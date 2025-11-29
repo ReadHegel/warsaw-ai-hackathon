@@ -9,17 +9,26 @@ from pydantic import BaseModel
 from DetectSegment.pipelines.detect_and_segment import DetectAndSegmentPipeline
 from DetectSegment.utils.io_utils import load_image
 
-# Optional simple chat module from UserPromptProcess
+"""FastAPI application for Detect + Segment + Chat reasoning."""
+
+# Optional chat module import
 try:
-    from UserPromptProcess.chat import generate_chat_answer
+    from UserPromptProcess.chat import (
+        generate_classes_with_llm,
+        generate_chat_answer,
+    )
 except Exception:
-    def generate_chat_answer(chat_history: List[Dict[str, Any]], classes: List[str]) -> str:
+    # Fallback simple implementations
+    def generate_classes_with_llm(chat_history: List[Dict[str, Any]], proposed_classes: List[str], current_image_path: Any) -> List[str]:
+        return list(proposed_classes or [])
+
+    def generate_chat_answer(chat_history: List[Dict[str, Any]], classes: List[str], current_image_path: Any, answer: Any) -> str:
         last_user = ""
         for msg in reversed(chat_history or []):
             if msg.get("role") == "user":
                 last_user = msg.get("content", "")
                 break
-        return f"Detected classes: {', '.join(classes)}. Your last message: {last_user}"
+        return f"(Fallback) Klasy: {', '.join(classes)}. Ostatnia wiadomość: {last_user}"
 
 
 ASSETS_DIR = Path("src/images")
@@ -87,36 +96,59 @@ async def segment_image(
     classes_json: str = Form(...),
     image: UploadFile = File(...),
 ):
+    """Main endpoint: upload image + chat history + proposed classes.
+
+    Steps:
+      1. Parse JSON payloads.
+      2. Save uploaded image.
+      3. Use vision-language model to refine class list.
+      4. Persist refined classes JSON for pipeline.
+      5. Run detect+segment pipeline.
+      6. Invoke chat answer model for user response.
+    """
     try:
         import json
         chat_hist = json.loads(chat_history)
         classes_data = json.loads(classes_json)
-        classes = classes_data.get("classes", [])
-        if not classes:
+        proposed_classes = classes_data.get("classes", [])
+        if not proposed_classes:
             raise ValueError("classes list required")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
 
-    # Save uploaded image to outputs
+    # Save uploaded image
     img_bytes = await image.read()
     tmp_img_path = OUTPUTS_DIR / f"upload_{image.filename}"
     with open(tmp_img_path, "wb") as f:
         f.write(img_bytes)
 
-    # Run pipeline
-    # Persist classes JSON alongside image for pipeline
+    # Refine classes using LLM with image context
+    refined_classes = []
+    try:
+        refined_classes = generate_classes_with_llm(chat_hist, proposed_classes, str(tmp_img_path))
+    except Exception:
+        refined_classes = list(proposed_classes)
+
+    # Persist refined classes JSON
     classes_path = str(tmp_img_path) + ".classes.json"
     import json
     with open(classes_path, "w", encoding="utf-8") as f:
-        json.dump({"classes": classes}, f, ensure_ascii=False, indent=2)
+        json.dump({"classes": refined_classes}, f, ensure_ascii=False, indent=2)
 
+    # Run pipeline
     pipeline = build_pipeline()
     result = pipeline.run(str(tmp_img_path), classes_path, str(OUTPUTS_DIR))
+    result["input"]["classes"] = refined_classes
 
-    # Overwrite classes in result with request classes
-    result["input"]["classes"] = classes
+    # Generate chat answer (LLM-based, fallback handled internally)
+    try:
+        chat_answer = generate_chat_answer(chat_hist, refined_classes, str(tmp_img_path), result)
+    except Exception:
+        chat_answer = "Nie udało się wygenerować odpowiedzi chatu."
 
-    # Generate chat answer
-    chat_answer = generate_chat_answer(chat_hist, classes)
-
-    return {"chat_answer": chat_answer, "detect_segment": result}
+    return {
+        "chat_answer": chat_answer,
+        "detect_segment": result,
+        "proposed_classes": proposed_classes,
+        "refined_classes": refined_classes,
+    }
