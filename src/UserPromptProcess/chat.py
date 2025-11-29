@@ -1,258 +1,185 @@
-from typing import List, Dict, Any, Tuple
+import torch
+from PIL import Image
+from typing import List, Dict, Any, Union
 from pathlib import Path
-
 import json
 
-from PIL import Image
+from google import genai
+from google.genai import types 
+from google.genai.errors import APIError
+
+_MODEL = None
+
+class Model:
+    def __init__(self, model_id: str = "gemini-2.5-flash"):
+        print(f"--> Inicjalizacja klienta Google GenAI dla modelu {model_id}...")
+        try:
+            # KLUCZ API: Upewnij się, że zmienna środowiskowa GEMINI_API_KEY jest ustawiona
+            self.client = genai.Client()
+            self.model_id = model_id
+            print("--> Klient Gemini API zainicjalizowany pomyślnie.")
+        except Exception as e:
+            raise RuntimeError(f"Nie udało się zainicjalizować klienta Gemini: {e}")
+
+    def predict(self, images_list: List[Image.Image], prompt: str) -> str:
+        """
+        Metoda inferencji. Wysyła prompt i obrazy do Gemini API.
+        Zachowuje interfejs predict(images_list, prompt).
+        """
+        if not self.client:
+            raise RuntimeError("Klient Gemini nie został poprawnie zainicjalizowany.")
+
+        # 1. Przygotowanie wejścia (List[Image.Image] + str)
+        # Gemini API oczekuje listy obiektów (TextPart, ImagePart)
+        
+        contents = []
+        
+        # Dodawanie obrazów
+        for img in images_list:
+             # Upewniamy się, że obraz ma poprawny format (RGB)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            contents.append(img)
+            
+        # Dodawanie tekstu promptu
+        contents.append(prompt)
+
+        # 2. Wywołanie API
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    # Ustawienia kreatywności i maksymalnej długości (odpowiednik temperatury i max_new_tokens)
+                    temperature=0.2,
+                    max_output_tokens=2048, # Wyższa wartość dla bezpieczeństwa
+                )
+            )
+
+            # print(f"[DEBUG] Gemini API response: {response}")
+            # 3. Zwracanie wyniku
+            return response.text.strip()
+        
+        except APIError as e:
+            raise RuntimeError(f"Błąd Gemini API: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Nieoczekiwany błąd podczas predykcji: {e}")
+
+# Inicjalizacja Singletona przy imporcie
+if _MODEL is None:
+    _MODEL = Model()
+
+
+# --- Funkcje pomocnicze ---
+
+def _load_image(path_or_obj: Any) -> Image.Image:
+    if isinstance(path_or_obj, Image.Image):
+        return path_or_obj.convert("RGB")
+    return Image.open(str(path_or_obj)).convert("RGB")
 
 
 def _extract_last_user_message(chat_history: List[Dict[str, Any]]) -> str:
-    last_user = ""
     for msg in reversed(chat_history or []):
         if msg.get("role") == "user":
-            last_user = msg.get("content", "")
-            break
-    return last_user
+            return msg.get("content", "")
+    return ""
 
 
-def _load_image(image_path: Any) -> Image.Image:
-    p = Path(str(image_path))
-    return Image.open(p).convert("RGB")
+# --- Główne funkcje API ---
 
-
-def _vision_llm_suggest_classes(
-    image: Image.Image, chat_context: str
-) -> Tuple[List[str], str]:
-    """Try a vision-capable LLM (e.g., LLaVA) to suggest site classes.
-
-    Returns (classes, justification). Falls back to a heuristic if model is unavailable.
-    """
-    try:
-        # LLaVA v1.5 via transformers (requires large VRAM; A100 is suitable)
-        from transformers import AutoProcessor, AutoModelForCausalLM
-
-        model_id = "liuhaotian/llava-v1.5-7b-hf"
-        processor = AutoProcessor.from_pretrained(model_id)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype="auto",
-            device_map="auto",
-        )
-
-        system_prompt = (
-            "You are an expert vision-language assistant analyzing a construction site image. "
-            "List 6-10 likely object classes present or relevant on a construction site, "
-            "considering the visible content. Prefer concise, single-word or short labels. "
-            "Output only a comma-separated list."
-        )
-        user_prompt = f"Context: {chat_context}\nImage analysis:"
-
-        inputs = processor(images=image, text=[system_prompt, user_prompt], return_tensors="pt").to(model.device)
-        generate_ids = model.generate(**inputs, max_new_tokens=128)
-        generated = processor.batch_decode(generate_ids, skip_special_tokens=True)[0]
-
-        # Extract last comma-separated segment
-        text = generated.split("\n")[-1]
-        raw_classes = [c.strip() for c in text.split(",") if c.strip()]
-
-        # Basic normalization
-        canonical = {
-            "helmet": "helmet",
-            "hard hat": "helmet",
-            "vest": "safety vest",
-            "safety vest": "safety vest",
-            "gloves": "gloves",
-            "boots": "boots",
-            "excavator": "excavator",
-            "crane": "crane",
-            "bulldozer": "bulldozer",
-            "dump truck": "dump truck",
-            "loader": "loader",
-            "wheel loader": "loader",
-            "steel beam": "steel beam",
-            "rebar": "rebar",
-            "concrete mixer": "concrete mixer",
-            "barrier": "barrier",
-            "traffic cone": "traffic cone",
-            "cone": "traffic cone",
-            "scaffolding": "scaffolding",
-            "ladder": "ladder",
-            "generator": "generator",
-            "cable": "cable",
-            "pipe": "pipe",
-            "container": "container",
-            "dumpster": "dumpster",
-            "sign": "sign",
-            "person": "person",
-        }
-        classes = []
-        for c in raw_classes:
-            key = c.lower()
-            classes.append(canonical.get(key, key))
-
-        justification = (
-            "Wybrane klasy pochodzą z analizy obrazu przez LLaVA "
-            "z uwzględnieniem kontekstu rozmowy. Zwracamy typowe obiekty "
-            "placu budowy i elementy BHP oraz ciężkie maszyny."
-        )
-        return classes, justification
-    except Exception:
-        # Heuristic fallback using keywords and common construction site items
-        baseline = [
-            "helmet",
-            "safety vest",
-            "gloves",
-            "boots",
-            "crane",
-            "excavator",
-            "bulldozer",
-            "dump truck",
-            "traffic cone",
-            "scaffolding",
-            "ladder",
-            "rebar",
-            "concrete mixer",
-            "barrier",
-            "generator",
-            "pipe",
-            "container",
-            "person",
-        ]
-        justification = (
-            "Model LLaVA nie był dostępny, użyto heurystyk: typowe obiekty "
-            "placu budowy oraz elementy BHP zostały dobrane jako klasy bazowe."
-        )
-        return baseline, justification
-
-
-def generate_classes_with_llm(
-    chat_history: List[Dict[str, Any]], proposed_classes: List[str], current_image_path: Any
+def suggest_classes(
+    image_path: Any, 
+    chat_history: List[Dict[str, Any]], 
+    proposed_classes: List[str]
 ) -> List[str]:
-    """Generate classes relevant to a construction site using a vision LLM.
-
-    - Considers `chat_history` context and the current image.
-    - Produces several candidate classes and appends `proposed_classes`.
-    - Returns a deduplicated, concise list.
     """
-    chat_context = _extract_last_user_message(chat_history)
-    image = _load_image(current_image_path)
-    llm_classes, _ = _vision_llm_suggest_classes(image, chat_context)
+    Analizuje obraz i zwraca listę max 10 klas obiektów (po polsku).
+    Uwzględnia klasy zaproponowane (proposed_classes).
+    """
+    image = _load_image(image_path)
+    user_context = _extract_last_user_message(chat_history)
+    proposed_str = ", ".join(proposed_classes) if proposed_classes else "brak"
 
-    combined = list(llm_classes) + list(proposed_classes or [])
+    # Duży preprompt systemowy
+    system_instruction = (
+        "Jesteś ekspertem wizyjnym na placu budowy. Twoim zadaniem jest stworzenie listy "
+        "kategorii obiektów widocznych na zdjęciu, które są istotne dla bezpieczeństwa i logistyki "
+        "(np. kask, koparka, rura, pracownik, rusztowanie).\n"
+        "ZASADY:\n"
+        "1. Przeanalizuj obraz i kontekst rozmowy.\n"
+        f"2. Uwzględnij te sugerowane klasy, jeśli faktycznie są na zdjęciu: [{proposed_str}].\n"
+        "3. Wypisz MAKSYMALNIE 10 najważniejszych klas.\n"
+        "4. Używaj języka polskiego.\n"
+        "5. Wynik ma być WYŁĄCZNIE listą oddzieloną przecinkami, bez numeracji i zbędnego tekstu."
+    )
 
-    # Deduplicate while preserving order
-    seen = set()
-    deduped = []
-    for c in combined:
-        key = str(c).strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(key)
-    return deduped
+    prompt = f"{system_instruction}\nKontekst rozmowy: '{user_context}'\nJakie obiekty widzisz?"
+
+    # Wywołanie modelu
+    raw_response = _MODEL.predict([image], prompt)
+    print(f"[DEBUG] Raw response for suggest_classes: {raw_response}")
+    
+    # Proste parsowanie wyniku na listę
+    # Usuwamy ewentualne kropki na końcu i dzielimy po przecinkach
+    clean_text = raw_response.replace(".", "").replace("\n", ",")
+    items = [x.strip().lower() for x in clean_text.split(",") if x.strip()]
+    
+    # Ograniczenie do 10 unikalnych
+    unique_items = list(dict.fromkeys(items))[:10]
+    
+    return unique_items
 
 
-def generate_chat_answer(
-    chat_history: List[Dict[str, Any]], classes: List[str], current_image_path: Any, answer: Any
+def chat_answer(
+    chat_history: List[Dict[str, Any]], 
+    classes: List[str], 
+    current_image_path: Any, 
+    answer_json: Any
 ) -> str:
-    """Użyj modelu wizja+język (np. LLaVA) aby odpowiedzieć użytkownikowi na
-    jego ostatnie pytanie, bazując na:
-      - obrazie źródłowym (`current_image_path`)
-      - obrazie z wizualizacją detekcji (boxes_visualization)
-      - pierwszym obrazie maski (mask_overlay_0.png jeśli istnieje)
-      - JSON wyników segmentacji (`answer`)
-
-    Jeśli model nie jest dostępny: zwróć klasyczny fallback tekstowy podsumowujący.
     """
+    Generuje odpowiedź dla użytkownika na podstawie obrazu, historii czatu i metadanych detekcji.
+    """
+    image = _load_image(current_image_path)
     last_user_question = _extract_last_user_message(chat_history)
-
-    # Ładuj JSON wyników
+    
+    # Parsowanie metadanych z detekcji
     try:
-        result = answer if isinstance(answer, dict) else json.loads(answer)
-    except Exception:
-        result = {}
+        data = answer_json if isinstance(answer_json, dict) else json.loads(answer_json)
+    except:
+        data = {}
 
-    detections = result.get("detections", [])
-    segments = result.get("segmentations", [])
-    boxes_vis_path = result.get("boxes_visualization")
-    # Spróbuj znaleźć pierwszą maskę
-    first_mask_path = None
-    for seg in segments:
-        p = seg.get("mask_overlay_path")
-        if p:
-            first_mask_path = p
-            break
+    detections = data.get("detections", [])
+    det_summary = ", ".join([f"{d.get('label')} (pewność: {d.get('score', 0):.2f})" for d in detections[:10]])
+    if not det_summary:
+        det_summary = "Brak wyraźnych detekcji w metadanych."
+    
+    classes_str = ", ".join(classes)
 
-    # Przygotuj zwięzły kontekst JSON dla promptu
-    def _shorten_detections(dets: List[Dict[str, Any]]) -> str:
-        parts = []
-        for d in dets[:12]:  # ogranicz liczbę wpisów
-            lbl = d.get("label")
-            score = d.get("score")
-            box = d.get("box")
-            parts.append(f"{lbl} (score={score:.2f}, box={box})")
-        return "; ".join(parts) if parts else "(brak detekcji)"
-
-    detections_summary = _shorten_detections(detections)
-    classes_str = ", ".join(classes or [])
-
-    system_prompt = (
-        "Jesteś ekspertem analizy obrazu dla placu budowy. Masz dane z detekcji i "
-        "segmentacji oraz pytanie użytkownika. Odpowiedz po polsku, zwięźle, uwzględniając co wykryto, "
-        "które klasy zostały użyte oraz jeśli to możliwe, opisz kontekst bezpieczeństwa. Nie spekuluj "
-        "nad obiektami nieobecnymi."
-    )
-    user_prompt = (
-        f"Pytanie użytkownika: '{last_user_question}'\n"
-        f"Użyte klasy: {classes_str}\n"
-        f"Detekcje: {detections_summary}\n"
-        f"Segmentacje: {len(segments)} masek\n"
-        "Odpowiedz bazując na obrazach i danych."
+    # Duży preprompt systemowy
+    system_instruction = (
+        "Jesteś inteligentnym asystentem BHP i inżynierem budownictwa. "
+        "Odpowiadasz na pytania użytkownika na podstawie dostarczonego zdjęcia oraz wyników detekcji obiektów.\n"
+        "ZASADY:\n"
+        "1. Odpowiadaj krótko, rzeczowo i po polsku.\n"
+        "2. Opieraj się na tym co widzisz na zdjęciu ORAZ na dostarczonych danych detekcji.\n"
+        "3. Jeśli pytanie dotyczy bezpieczeństwa, zwróć uwagę na brak kasków lub kamizelek.\n"
+        "4. Bądź pomocny i profesjonalny."
     )
 
-    # Spróbuj modeli LLaVA
-    try:
-        from transformers import AutoProcessor, AutoModelForCausalLM
-        import torch
+    data_context = (
+        f"Dane z detektora obiektów: [{det_summary}].\n"
+        f"Lista wykrytych klas ogólnych: [{classes_str}].\n"
+        f"Segmentacja: wykryto {len(data.get('segmentations', []))} masek obiektów."
+    )
 
-        model_id = "liuhaotian/llava-v1.5-7b-hf"
-        processor = AutoProcessor.from_pretrained(model_id)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype="auto", device_map="auto"
-        )
+    prompt = (
+        f"{system_instruction}\n\n"
+        f"DANE TECHNICZNE:\n{data_context}\n\n"
+        f"PYTANIE UŻYTKOWNIKA: '{last_user_question}'\n"
+        "ODPOWIEDŹ:"
+    )
 
-        # Załaduj obrazy kontekstowe (lista)
-        images = []
-        try:
-            images.append(_load_image(current_image_path))
-        except Exception:
-            pass
-        for extra_path in [boxes_vis_path, first_mask_path]:
-            if extra_path:
-                try:
-                    images.append(_load_image(extra_path))
-                except Exception:
-                    pass
-
-        # Jeśli brak obrazów, fallback do tekstowego
-        if not images:
-            raise RuntimeError("Brak obrazów do analizy LLaVA")
-
-        inputs = processor(images=images, text=[system_prompt, user_prompt], return_tensors="pt").to(model.device)
-        generate_ids = model.generate(**inputs, max_new_tokens=256)
-        raw_output = processor.batch_decode(generate_ids, skip_special_tokens=True)[0]
-        # Weź ostatni fragment jako odpowiedź
-        llm_answer = raw_output.split("\n")[-1].strip()
-        if not llm_answer:
-            llm_answer = raw_output.strip()
-        return llm_answer
-    except Exception:
-        # Fallback tekstowy
-        found_labels = [str(d.get("label", "")).strip() for d in detections if d.get("label")]
-        found_str = ", ".join(found_labels) if found_labels else "brak pewnych wykryć"
-        justification = result.get("justification") or (
-            "Model LLaVA niedostępny – odpowiedź oparta na danych z detektora i segmentacji."
-        )
-        return (
-            f"Odpowiedź (fallback): W obrazie wykryto: {found_str}. Użyte klasy: {classes_str}. "
-            f"Segmentacji: {len(segments)}. {justification} Pytanie użytkownika: '{last_user_question}'."
-        )
+    # Wywołanie modelu
+    response = _MODEL.predict([image], prompt)
+    
+    return response
