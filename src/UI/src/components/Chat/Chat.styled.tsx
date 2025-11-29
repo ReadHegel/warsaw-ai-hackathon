@@ -3,16 +3,20 @@ import styled from "styled-components";
 
 export const ChatWrapper = styled(Stack)`
     width: calc(100% - 20px);
-    max-height: calc(100vh - 20px);
+    max-height: calc(90vh - 20px);
     overflow-y: hidden;
     padding: 10px;
+    display: flex;
+    gap: 2;
+    padding: 2;
+    flex-direction: row;
 `;
 
 export const ChatSectionContainer = styled(Stack)`
-    flex: 1;
     max-height: calc(90vh - 20px);
     padding: 10px;
     border-radius: 10px;
+    transition: flex 0.2s;
 `;
 
 export const ChatMessagesSection = styled(Stack)`
@@ -20,6 +24,7 @@ export const ChatMessagesSection = styled(Stack)`
     overflow-y: scroll;
     gap: 16px;
     padding-bottom: 20px;
+    overscroll-behavior: contain;
 `;
 
 export const ChatUserMessage = styled(Paper)`
