@@ -10,7 +10,7 @@ interface ImageDisplayProps {
 
 export const ImageDisplay = ({
     showControls
-}:ImageDisplayProps) => {
+}: ImageDisplayProps) => {
 
     const [showMask, setShowMask] = useState(false);
 
