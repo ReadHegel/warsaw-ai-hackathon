@@ -1,0 +1,8 @@
+{
+  "classes": [
+    "truck",
+    "loader",
+    "excavator",
+    "pipe"
+  ]
+}

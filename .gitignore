@@ -1,5 +1,4 @@
-<<<<<<< HEAD
 hackathon/
-=======
 .venv/
->>>>>>> cf0470a (r)
+*__pycache__/
+*__pycache__/**

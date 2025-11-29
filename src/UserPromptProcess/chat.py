@@ -52,7 +52,7 @@ class Model:
                 config=types.GenerateContentConfig(
                     # Ustawienia kreatywności i maksymalnej długości (odpowiednik temperatury i max_new_tokens)
                     temperature=0.2,
-                    max_output_tokens=2048, # Wyższa wartość dla bezpieczeństwa
+                    max_output_tokens=10048, # Wyższa wartość dla bezpieczeństwa
                 )
             )
 
@@ -63,6 +63,7 @@ class Model:
         except APIError as e:
             raise RuntimeError(f"Błąd Gemini API: {e}")
         except Exception as e:
+            print("[ERROR]", response)
             raise RuntimeError(f"Nieoczekiwany błąd podczas predykcji: {e}")
 
 # Inicjalizacja Singletona przy imporcie
@@ -78,11 +79,40 @@ def _load_image(path_or_obj: Any) -> Image.Image:
     return Image.open(str(path_or_obj)).convert("RGB")
 
 
-def _extract_last_user_message(chat_history: List[Dict[str, Any]]) -> str:
-    for msg in reversed(chat_history or []):
-        if msg.get("role") == "user":
-            return msg.get("content", "")
-    return ""
+def _chat_hist_to_string(chat_history: Any) -> str:
+    """
+    Konwertuje chat_history (może być JSON-string, dict z kluczem 'messages' lub lista wiadomości)
+    na tekst ostatniego wpisu użytkownika (role == 'user').
+    Przyjmuje format zgodny z przykładem curl: {"messages":[{"role":"user","content":"..."}, ...]}
+    """
+    try:
+        # Jeśli dostarczono JSON jako string, spróbuj zdeserializować
+        if isinstance(chat_history, str):
+            try:
+                obj = json.loads(chat_history)
+            except Exception:
+                # Jeśli nie jest to JSON, zwróć surowy string
+                return chat_history.strip()
+        else:
+            obj = chat_history
+
+        # Obsłuż obiekt z kluczem "messages"
+        if isinstance(obj, dict) and "messages" in obj and isinstance(obj["messages"], list):
+            msgs = obj["messages"]
+        elif isinstance(obj, list):
+            msgs = obj
+        else:
+            return ""
+
+        # Znajdź ostatnią wiadomość od użytkownika (od końca)
+        for msg in reversed(msgs):
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") == "user":
+                return str(msg.get("content", "")).strip()
+        return ""
+    except Exception:
+        return ""
 
 
 # --- Główne funkcje API ---
@@ -90,26 +120,28 @@ def _extract_last_user_message(chat_history: List[Dict[str, Any]]) -> str:
 def suggest_classes(
     image_path: Any, 
     chat_history: List[Dict[str, Any]], 
-    proposed_classes: List[str]
+    # proposed_classes: List[str]
 ) -> List[str]:
     """
     Analizuje obraz i zwraca listę max 10 klas obiektów (po polsku).
     Uwzględnia klasy zaproponowane (proposed_classes).
     """
     image = _load_image(image_path)
-    user_context = _extract_last_user_message(chat_history)
-    proposed_str = ", ".join(proposed_classes) if proposed_classes else "brak"
+    user_context = _chat_hist_to_string(chat_history)
+    print(f"[DEBUG] User context for suggest_classes: {user_context}")
+    # proposed_str = ", ".join(proposed_classes) if proposed_classes else "brak"
 
     # Duży preprompt systemowy
     system_instruction = (
         "Jesteś ekspertem wizyjnym na placu budowy. Twoim zadaniem jest stworzenie listy "
-        "kategorii obiektów widocznych na zdjęciu, które są istotne dla bezpieczeństwa i logistyki "
+        "kategorii obiektów widocznych na zdjęciu, które są istotne dla dla zapytania od użytkownika. "
         "(np. kask, koparka, rura, pracownik, rusztowanie).\n"
         "ZASADY:\n"
         "1. Przeanalizuj obraz i kontekst rozmowy.\n"
-        f"2. Uwzględnij te sugerowane klasy, jeśli faktycznie są na zdjęciu: [{proposed_str}].\n"
-        "3. Wypisz MAKSYMALNIE 10 najważniejszych klas.\n"
-        "4. Używaj języka polskiego.\n"
+        f"2. Uwzględnij te sugerowane klasy.\n"
+        "3. Wypisz MAKSYMALNIE 4 najważniejszych klas.\n"
+        "4. Nie próbuj na siłę dodawać klas, jeśli nie pasują do promptu użytkownika, ale jeśli prosi Cię o propozycję to możesz dodać jakieś swoje klasy\n"
+        "4. Używaj tylko rzeczowników w języku angielskim.\n"
         "5. Wynik ma być WYŁĄCZNIE listą oddzieloną przecinkami, bez numeracji i zbędnego tekstu."
     )
 
@@ -134,13 +166,13 @@ def chat_answer(
     chat_history: List[Dict[str, Any]], 
     classes: List[str], 
     current_image_path: Any, 
-    answer_json: Any
+    answer_json: Any = None
 ) -> str:
     """
     Generuje odpowiedź dla użytkownika na podstawie obrazu, historii czatu i metadanych detekcji.
     """
     image = _load_image(current_image_path)
-    last_user_question = _extract_last_user_message(chat_history)
+    last_user_question = _chat_hist_to_string(chat_history)
     
     # Parsowanie metadanych z detekcji
     try:
@@ -157,9 +189,10 @@ def chat_answer(
 
     # Duży preprompt systemowy
     system_instruction = (
-        "Jesteś inteligentnym asystentem BHP i inżynierem budownictwa. "
+        "Jesteś inteligentnym asystentem, który pomaga w analizie zdjęć z placu budowy. "
         "Odpowiadasz na pytania użytkownika na podstawie dostarczonego zdjęcia oraz wyników detekcji obiektów.\n"
         "ZASADY:\n"
+        "Twoim zadaniem jest opowiedzenie co stało się na zdjęciu i podsumowanie detekcji obiektów."
         "1. Odpowiadaj krótko, rzeczowo i po polsku.\n"
         "2. Opieraj się na tym co widzisz na zdjęciu ORAZ na dostarczonych danych detekcji.\n"
         "3. Jeśli pytanie dotyczy bezpieczeństwa, zwróć uwagę na brak kasków lub kamizelek.\n"

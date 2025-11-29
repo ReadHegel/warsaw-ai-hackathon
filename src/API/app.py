@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 import os
 from pathlib import Path
+from io import BytesIO
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -8,13 +9,20 @@ from pydantic import BaseModel
 
 from DetectSegment.pipelines.detect_and_segment import DetectAndSegmentPipeline
 from DetectSegment.utils.io_utils import load_image
-
 import UserPromptProcess.chat  # ensure chat module is loaded
 from UserPromptProcess.chat import suggest_classes, chat_answer
 
 import torch
 from transformers import Sam3Processor, Sam3Model
 from PIL import Image
+
+import numpy as np
+import matplotlib
+from PIL import ImageDraw, ImageFont
+
+import json
+from fastapi.responses import StreamingResponse
+import base64
 
 """FastAPI application for Detect + Segment + Chat reasoning."""
 
@@ -45,7 +53,7 @@ model = Sam3Model.from_pretrained("facebook/sam3").to(device)
 processor = Sam3Processor.from_pretrained("facebook/sam3")
 model.eval()
 
-ASSETS_DIR = Path("src/images")
+ASSETS_DIR = Path("Images")
 OUTPUTS_DIR = Path("src/DetectSegment/tests/outputs_api")
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -87,6 +95,8 @@ def build_pipeline() -> DetectAndSegmentPipeline:
 def process_image_with_class_list(image: Image.Image, class_names: List[str],
                               score_threshold: float = 0.5,
                               mask_threshold: float = 0.5):
+    all_masks = []
+    all_labels = []
     for class_name in class_names:
         res = predict_for_class(image, class_name)
         if len(res["masks"]) == 0:
@@ -106,8 +116,8 @@ def process_image_with_class_list(image: Image.Image, class_names: List[str],
 
 
 def predict_for_class(image: Image.Image, class_name: str,
-                      score_threshold: float = 0.5,
-                      mask_threshold: float = 0.5):
+                      score_threshold: float = 0.57,
+                      mask_threshold: float = 0.57):
     """
     Run SAM3 for a single text prompt and return post-processed results.
     """
@@ -209,7 +219,7 @@ def get_image(path: str):
 @app.post("/segment_image")
 async def segment_image(
     chat_history: str = Form(...),
-    classes_json: str = Form(...),
+    # classes_json: str = Form(...),
     image: UploadFile = File(...),
 ):
     """Main endpoint: upload image + chat history + proposed classes.
@@ -225,10 +235,10 @@ async def segment_image(
     try:
         import json
         chat_hist = json.loads(chat_history)
-        classes_data = json.loads(classes_json)
-        proposed_classes = classes_data.get("classes", [])
-        if not proposed_classes:
-            raise ValueError("classes list required")
+        #classes_data = json.loads(classes_json)
+        #proposed_classes = classes_data.get("classes", [])
+        # if not proposed_classes:
+        #     raise ValueError("classes list required")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
 
@@ -240,11 +250,12 @@ async def segment_image(
         f.write(img_bytes)
 
     # Refine classes using LLM with image context
-    refined_classes = suggest_classes(str(tmp_img_path), chat_hist, proposed_classes)
+    refined_classes = suggest_classes(str(tmp_img_path), chat_hist)
+    print(refined_classes)
 
     # Persist refined classes JSON
     classes_path = str(tmp_img_path) + ".classes.json"
-    import json
+
     with open(classes_path, "w", encoding="utf-8") as f:
         json.dump({"classes": refined_classes}, f, ensure_ascii=False, indent=2)
 
@@ -257,9 +268,11 @@ async def segment_image(
         image_masked,
     )
 
-    return {
-        "chat_answer": chat_response,
-        "detect_segment": result,
-        "proposed_classes": proposed_classes,
-        "refined_classes": refined_classes,
-    }
+
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    out_name = f"masked_{Path(tmp_img_path).stem}.png"
+    out_path = ASSETS_DIR / out_name
+    image_masked.save(out_path, format="PNG")
+
+    return {"chat_response": chat_response, "masked_image_path": str(out_path)}
+        
