@@ -1,0 +1,8 @@
+torch
+transformers
+accelerate
+safetensors
+Pillow
+numpy
+opencv-python
+segment-anything
