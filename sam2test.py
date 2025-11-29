@@ -5,78 +5,107 @@ from typing import List, Dict, Any, Union
 import torch
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from transformers import pipeline, Sam2Model, Sam2Processor
+from transformers import (
+    AutoProcessor,
+    AutoModelForZeroShotObjectDetection,
+    Sam2Model,
+    Sam2Processor,
+    infer_device,
+)
 from transformers.image_utils import load_image
 
 
-# ---------- Utility: random but stable color per class ----------
+# ---------------- Utility: stable label colors ----------------
 def color_for_label(label: str):
-    random.seed(hash(label) % (2 ** 16))
+    random.seed(hash(label) % (2**16))
     return (
-        random.randint(80, 255),
-        random.randint(80, 255),
-        random.randint(80, 255),
+        random.randint(60, 255),
+        random.randint(60, 255),
+        random.randint(60, 255),
     )
 
 
-# ---------- Main pipeline ----------
-class ZeroShotDetSam2Visualizer:
+# -------------------- Main Pipeline ---------------------------
+class GroundingDinoSam2Visualizer:
     def __init__(
         self,
-        det_checkpoint="google/owlv2-base-patch16-ensemble",
-        sam_checkpoint="facebook/sam2.1-hiera-small",
+        det_checkpoint="IDEA-Research/grounding-dino-2.0-large",
+        sam_checkpoint="facebook/sam2.1-hiera-small-image",
         device="auto"
     ):
-        if device == "auto":
-            dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            dev = torch.device(device)
+        # resolve device
+        device = infer_device() if device == "auto" else torch.device(device)
+        self.device = device
 
-        self.device = dev
-        det_device_index = dev.index if dev.type == "cuda" else -1
+        # -------- Grounding DINO --------
+        self.dino_processor = AutoProcessor.from_pretrained(det_checkpoint)
+        self.dino_model = AutoModelForZeroShotObjectDetection.from_pretrained(
+            det_checkpoint
+        ).to(device)
+        self.dino_model.eval()
 
-        # Zero-shot detector
-        self.detector = pipeline(
-            "zero-shot-object-detection",
-            model=det_checkpoint,
-            device=det_device_index,
-        )
-
-        # SAM2
-        self.sam_model = Sam2Model.from_pretrained(sam_checkpoint).to(dev)
-        self.sam_model.eval()
+        # -------- SAM2 --------
         self.sam_processor = Sam2Processor.from_pretrained(sam_checkpoint)
+        self.sam_model = Sam2Model.from_pretrained(sam_checkpoint).to(device)
+        self.sam_model.eval()
 
-    def run(self, image_path: str, classes: List[str], score_threshold=0.35):
+    # -----------------------------------------------------------
+    def run(self, image_path: str, classes: List[str], box_threshold=0.3, text_threshold=0.25):
+        """
+        classes: list of target labels e.g. ["person", "dog"]
+        """
         pil_image = load_image(image_path).convert("RGB")
         width, height = pil_image.size
 
-        # --- 1. Zero-shot detection ---
-        det_out = self.detector(
-            pil_image,
-            candidate_labels=classes,
-            threshold=score_threshold,
-        )
+        # Prepare text prompt: comma-separated
+        # text_prompt = ", ".join(classes)
+        text_prompt = ""
+        for cl in classes:
+            text_prompt += cl
+            text_prompt += ". "
 
-        if not det_out:
+        text_prompt = text_prompt[:-1]
+        print(text_prompt)
+
+
+        # --------- 1) Grounding DINO inference ---------
+        inputs = self.dino_processor(
+            images=pil_image,
+            text=text_prompt,
+            return_tensors="pt"
+        ).to(self.device)
+
+        with torch.inference_mode():
+            outputs = self.dino_model(**inputs)
+
+        # Post-process to get boxes
+        results = self.dino_processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=box_threshold,
+            text_threshold=text_threshold,
+            target_sizes=[pil_image.size[::-1]],  # (height, width)
+        )[0]
+
+        print(results)
+        boxes = results["boxes"]       # shape: (N,4) [xmin,ymin,xmax,ymax]
+        scores = results["scores"]     # shape: (N)
+        labels = results["labels"]     # shape: (N) textual labels
+
+        if len(boxes) == 0:
             print("No detections found.")
             return pil_image
 
-        # Format boxes for SAM2
-        input_boxes = [[
-            [
-                int(p["box"]["xmin"]),
-                int(p["box"]["ymin"]),
-                int(p["box"]["xmax"]),
-                int(p["box"]["ymax"])
-            ]
-            for p in det_out
+        # Format boxes for SAM2 expected format: [1, N, 4]
+        sam_boxes = [[
+            [int(x) for x in box.tolist()]
+            for box in boxes
         ]]
 
-        # --- 2. SAM2 segmentation ---
+        # --------- 2) SAM2 segmentation from boxes ---------
         sam_inputs = self.sam_processor(
             images=pil_image,
-            input_boxes=input_boxes,
+            input_boxes=sam_boxes,
             return_tensors="pt"
         ).to(self.device)
 
@@ -86,60 +115,59 @@ class ZeroShotDetSam2Visualizer:
         masks = self.sam_processor.post_process_masks(
             sam_outputs.pred_masks.cpu(),
             sam_inputs["original_sizes"],
-        )[0]  # (N, H, W)
+        )[0]  # now (N, H, W)
 
         if masks.ndim == 4:
-            masks = masks[:, 0]  # enforce (N,H,W)
+            masks = masks[:, 0]  # enforce (N, H, W)
 
-        masks = masks > 0.5
+        masks = masks > 0.9
 
-        # --- 3. Render overlay ---
+        # --------- 3) Render overlay output ---------
         overlay = pil_image.copy()
-        draw = ImageDraw.Draw(overlay, "RGBA")
+        drawer = ImageDraw.Draw(overlay, "RGBA")
 
-        # Optionally load font
         try:
             font = ImageFont.truetype("arial.ttf", 18)
         except:
             font = ImageFont.load_default()
 
-        for pred, mask in zip(det_out, masks):
-            label = pred["label"]
-            score = float(pred["score"])
+        for box, score, label, mask in zip(boxes, scores, labels, masks):
             color = color_for_label(label)
 
-            # ---- Draw mask ----
-            mask_np = mask.numpy().astype("uint8") * 120  # transparency
+            # ---- mask ----
+            mask_np = mask.numpy().astype("uint8") * 140
             mask_img = Image.fromarray(mask_np, mode="L")
-            color_img = Image.new("RGBA", (width, height), color + (120,))
-            overlay.paste(color_img, (0, 0), mask_img)
+            tint = Image.new("RGBA", (width, height), color + (140,))
+            overlay.paste(tint, (0, 0), mask_img)
 
-            # ---- Draw box ----
-            box = pred["box"]
-            xmin, ymin, xmax, ymax = (
-                int(box["xmin"]), int(box["ymin"]),
-                int(box["xmax"]), int(box["ymax"])
-            )
-            draw.rectangle([xmin, ymin, xmax, ymax], outline=color, width=3)
+            # ---- bounding box ----
+            xmin, ymin, xmax, ymax = map(int, box.tolist())
+            drawer.rectangle([xmin, ymin, xmax, ymax], outline=color, width=3)
 
-            # # ---- Draw label ----
-            # caption = f"{label} {score:.2f}"
-            # tw, th = draw.textsize(caption, font=font)
-            # draw.rectangle([xmin, ymin - th, xmin + tw, ymin], fill=color + (180,))
-            # draw.text((xmin, ymin - th), caption, fill=(0, 0, 0), font=font)
+            # ---- label text ----
+            # caption = f"{label} {float(score):.2f}"
+            # tw, th = drawer.textsize(caption, font=font)
+            # drawer.rectangle([xmin, ymin - th, xmin + tw, ymin], fill=color + (210,))
+            # drawer.text((xmin, ymin - th), caption, fill=(0, 0, 0), font=font)
 
         return overlay
 
 
 # ------------------- Example Usage -------------------
 if __name__ == "__main__":
-    pipe = ZeroShotDetSam2Visualizer()
-
-    img = pipe.run(
-        image_path="input.jpg",
-        classes=["person", "dog", "cat"],
-        score_threshold=0.4
+    pipe = GroundingDinoSam2Visualizer(
+        det_checkpoint="IDEA-Research/grounding-dino-2.0-large",
+        sam_checkpoint="facebook/sam2.1-hiera-large",
+        device="cuda"
     )
 
-    img.save("output_overlay.jpg")
-    print("Saved → output_overlay.jpg")
+    out = pipe.run(
+        "../../test_image/geoportal_ortho_5cm.jpg",
+        classes=["construcsion site with buildings, road, vehicles, containers"],
+        # classes=["person", "dog", "cat", "car", "bicycle"],
+        box_threshold=0.3,
+        text_threshold=0.15
+    )
+
+    out.save("output_overlay1.jpg")
+    print("Saved → output_overlay1.jpg")
