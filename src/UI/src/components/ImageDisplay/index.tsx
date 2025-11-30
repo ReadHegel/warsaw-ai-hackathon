@@ -1,39 +1,35 @@
-import { ImageDisplayWrapper, ImageDisplayImg, ImageWrapper, ImageControlsWrapper} from "./ImageDisplay.styled";
-import DUMMY_IMAGE from '../../assets/DUMMY_IMAGE.png';
-import DUMMY_OVERLAY from '../../assets/shrek2.png';
-import { Box, Stack, Switch, Typography } from "@mui/material";
+import { ImageDisplayWrapper, ImageDisplayImg, ImageControlsWrapper} from "./ImageDisplay.styled";
+import { Stack, Switch, Typography } from "@mui/material";
 import { useState } from "react";
+import Zoom from "react-medium-image-zoom";
+import "react-medium-image-zoom/dist/styles.css";
 
 interface ImageDisplayProps {
     showControls: boolean;
+    url: string;
+    maskUrl: string;
 }
 
 export const ImageDisplay = ({
-    showControls
+    showControls,
+    url,
+    maskUrl
 }: ImageDisplayProps) => {
 
-    const [showMask, setShowMask] = useState(false);
+    const [showMask, setShowMask] = useState(true);
 
     return (
     <ImageDisplayWrapper>
-        <ImageWrapper image={DUMMY_IMAGE}>
-            {showMask && (<Box
-                component="img"
-                src={DUMMY_OVERLAY}
-                alt="Overlay"
-                sx={{
-                    gridArea: "1 / 1",    // same cell → perfect overlap
-                    maxHeight: '80vh',
-                    overflow: 'hidden'
-                }}
-            />)}
-        </ImageWrapper>
+        <Zoom>
+            <ImageDisplayImg src={showMask && maskUrl.length > 0 ? maskUrl : url} alt="image" />
+        </Zoom>
+        
         {showControls && (<ImageControlsWrapper>
             <Stack direction="row" alignItems="center">
                 <Typography variant="body1" color="primary">
                     Show mask
                 </Typography>
-                <Switch onChange={(e) => setShowMask(e.target.checked)}/>
+                <Switch onChange={(e) => setShowMask(e.target.checked)} checked={showMask}/>
             </Stack>
         </ImageControlsWrapper>)}
     </ImageDisplayWrapper>
