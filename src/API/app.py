@@ -23,6 +23,7 @@ from PIL import ImageDraw, ImageFont
 import json
 from fastapi.responses import StreamingResponse
 import base64
+from fastapi.middleware.cors import CORSMiddleware
 
 """FastAPI application for Detect + Segment + Chat reasoning."""
 
@@ -69,7 +70,13 @@ if not SAM_CHECKPOINT:
 
 
 app = FastAPI(title="DetectSegment API")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[""],          # Allow all origins
+    allow_credentials=True,
+    allow_methods=[""],          # Allow all methods
+    allow_headers=["*"],          # Allow all headers
+)
 
 class SegmentImageRequest(BaseModel):
     chat_history: List[Dict[str, Any]]
@@ -166,8 +173,10 @@ def overlay_masks_with_labels(image: Image.Image,
     draw = ImageDraw.Draw(image)
 
     # Font
+    w, h = image.size
+    font_size = max(16, int(min(w, h) * 0.03))
     try:
-        font = ImageFont.truetype("arial.ttf", 20)
+        font = ImageFont.truetype("arial.ttf", font_size)
     except Exception:
         font = ImageFont.load_default()
 

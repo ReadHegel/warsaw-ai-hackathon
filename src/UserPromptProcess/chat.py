@@ -52,7 +52,7 @@ class Model:
                 config=types.GenerateContentConfig(
                     # Ustawienia kreatywności i maksymalnej długości (odpowiednik temperatury i max_new_tokens)
                     temperature=0.2,
-                    max_output_tokens=10048, # Wyższa wartość dla bezpieczeństwa
+                    max_output_tokens=30048, # Wyższa wartość dla bezpieczeństwa
                 )
             )
 
@@ -140,12 +140,13 @@ def suggest_classes(
         "1. Przeanalizuj obraz i kontekst rozmowy.\n"
         f"2. Uwzględnij te sugerowane klasy.\n"
         "3. Wypisz MAKSYMALNIE 4 najważniejszych klas.\n"
-        "4. Nie próbuj na siłę dodawać klas, jeśli nie pasują do promptu użytkownika, ale jeśli prosi Cię o propozycję to możesz dodać jakieś swoje klasy\n"
+        "4. Nie próbuj NA SIŁĘ dodawać klas, jeśli nie pasują do promptu użytkownika, ale jeśli prosi Cię o propozycję to możesz dodać jakieś swoje klasy\n"
+        "5. Jeśli użytkownik pyta o segmentację dróg gruntowych to oddaj tylko klasę droga gruntowa. Ewentualnie jakieś synonimy tej klasy.\n"
         "4. Używaj tylko rzeczowników w języku angielskim.\n"
         "5. Wynik ma być WYŁĄCZNIE listą oddzieloną przecinkami, bez numeracji i zbędnego tekstu."
     )
 
-    prompt = f"{system_instruction}\nKontekst rozmowy: '{user_context}'\nJakie obiekty widzisz?"
+    prompt = f"{system_instruction}\nKontekst rozmowy: '{user_context}"
 
     # Wywołanie modelu
     raw_response = _MODEL.predict([image], prompt)
