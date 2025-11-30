@@ -123,8 +123,8 @@ def process_image_with_class_list(image: Image.Image, class_names: List[str],
 
 
 def predict_for_class(image: Image.Image, class_name: str,
-                      score_threshold: float = 0.57,
-                      mask_threshold: float = 0.57):
+                      score_threshold: float = 0.60,
+                      mask_threshold: float = 0.5):
     """
     Run SAM3 for a single text prompt and return post-processed results.
     """
@@ -174,11 +174,19 @@ def overlay_masks_with_labels(image: Image.Image,
 
     # Font
     w, h = image.size
-    font_size = max(16, int(min(w, h) * 0.03))
+    font_size = max(4, int(min(w, h) * 0.02))
     try:
         font = ImageFont.truetype("arial.ttf", font_size)
     except Exception:
-        font = ImageFont.load_default()
+        try:
+            # Try available system fonts
+            font = ImageFont.truetype("/usr/share/fonts/cantarell/Cantarell-Bold.otf", font_size)
+        except Exception:
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/adobe-source-code-pro/SourceCodePro-Bold.otf", font_size)
+            except Exception:
+                print(f"Warning: truetype fonts not found. Using default font.")
+                font = ImageFont.load_default()
 
     # Draw bounding boxes + labels
     for idx, (mask, color) in enumerate(zip(masks_np, colors)):
@@ -241,6 +249,7 @@ async def segment_image(
       5. Run detect+segment pipeline.
       6. Invoke chat answer model for user response.
     """
+    print("chat_History na początku endpointu:", chat_history)
     try:
         import json
         chat_hist = json.loads(chat_history)

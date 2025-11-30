@@ -147,6 +147,7 @@ def suggest_classes(
     )
 
     prompt = f"{system_instruction}\nKontekst rozmowy: '{user_context}"
+    print(f"[DEBUG] Prompt for suggest_classes: {prompt}")
 
     # Wywołanie modelu
     raw_response = _MODEL.predict([image], prompt)
@@ -201,14 +202,14 @@ def chat_answer(
     )
 
     data_context = (
-        f"Dane z detektora obiektów: [{det_summary}].\n"
-        f"Lista wykrytych klas ogólnych: [{classes_str}].\n"
-        f"Segmentacja: wykryto {len(data.get('segmentations', []))} masek obiektów."
+        #f"Dane z detektora obiektów: [{det_summary}].\n"
+        #f"Lista wykrytych klas ogólnych: [{classes_str}].\n"
+        #f"Segmentacja: wykryto {len(data.get('segmentations', []))} masek obiektów."
     )
 
     prompt = (
         f"{system_instruction}\n\n"
-        f"DANE TECHNICZNE:\n{data_context}\n\n"
+        #f"DANE TECHNICZNE:\n{data_context}\n\n"
         f"PYTANIE UŻYTKOWNIKA: '{last_user_question}'\n"
         "ODPOWIEDŹ:"
     )
