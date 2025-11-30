@@ -1,6 +1,6 @@
 # warsaw-ai-hackaton
 
-## VisSegBud - opis budowy tanio, szybko i skutecznie
+## VisSegBud - opis budowy za pomocą sztucznej inteligencji
 
 VisSegBud to program do opisywania i zaznaczania poszczególnych części danego obrazu budowy za pomocą segmentowania obrazu. Dostęp do tej funkcjonalności jest możliwy przez webowy interfejs użytkownika
 
