@@ -15,6 +15,8 @@ import SendIcon from '@mui/icons-material/Send';
 import { ImageHiding } from "../ImageHiding";
 import { useParams } from "react-router";
 import axios from "axios";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Message = {
     role: 'user' | 'assistant',
@@ -26,51 +28,73 @@ export const Chat = () => {
     const [chat, setChat] = useState<Message[]>([]);
 
     const [mess, setMess] = useState('');
-    const [chatSize, setChatSize] = useState<1|3>(1);
+    const [chatSize, setChatSize] = useState<1|3>(3);
     const [status, setStatus] = useState<"loading" | "idle">("idle");
     const [chatId, setChatId] = useState<string|null>(null);
+    const [imageUrl, setImageUrl] = useState<string>('');
+    const [imageBlob, setImageBlob] = useState<BlobPart | null>(null);
+    const [maskUrl, setMaskUrl] = useState<string>('');
+    const [error, setError] = useState(false);
 
     const params = useParams();
 
     const sendMessage = async() => {
+        setError(false);
         setStatus("loading");
         const userMess = mess;
+        const newHistory = [...chat, {
+            role: "user",
+            content: userMess
+        }];
         setChat((curr) => [...curr, {
             role: "user",
             content: userMess
         }]);
         setMess('');
-        const {content} = await new Promise<{content: string}>((res) => {
-            setTimeout(() => {
-                return res({
-                    content: "Hello There!"
-                })
-            }, 2000)
-        })
-        setStatus("idle");
-        setChat((curr) => [...curr, {
-            role: "assistant",
-            content
-        }]);
-        let baseId = chatId;
-        if(chatId === null){
-            const res = await axios.post('/localApi/createNewConv');
-            const newChatId = res.data.newId.replaceAll("\"", '');
-            console.log(newChatId);
-            setChatId(newChatId); 
-            baseId = newChatId;
-        }
-        const saveData = await axios.post('/localApi/saveConvToDb', {
-            assistantMess: content,
-            userMess,
-            baseId
-        }, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+        try {
+            const file = new File([imageBlob as BlobPart], "image.png", { type: "image/png" });
+            const formData = new FormData();
+            formData.append("chat_history", JSON.stringify(newHistory));
+            formData.append("image", file);
+            const res = await axios.post('http://localhost:8899/segment_image', formData,
+                {
+                    headers: {
+                        "Content-Type": "multipart/form-data",
+                    },
+                }
+            );
 
-        window.history.pushState({}, "", `/chat/${baseId}`);
+            const {chat_response, masked_image_path} = res.data;
+            console.log('jest kurwa', res);
+            await getImage(masked_image_path, setMaskUrl); 
+            setStatus("idle");
+            setChat((curr) => [...curr, {
+                role: "assistant",
+                content: chat_response
+            }]);
+
+            let baseId = chatId;
+            if(chatId === null){
+                const res = await axios.post('/localApi/createNewConv');
+                const newChatId = res.data.newId.replaceAll("\"", '');
+                console.log(newChatId);
+                setChatId(newChatId); 
+                baseId = newChatId;
+            }
+            const saveData = await axios.post('/localApi/saveConvToDb', {
+                assistantMess: chat_response,
+                userMess,
+                baseId
+            }, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            window.history.pushState({}, "", `/chat/${baseId}`);
+        } catch (error){
+            setError(true);
+            console.log(error);
+        }
         
     }
 
@@ -88,6 +112,21 @@ export const Chat = () => {
         setChatSize((curr) => curr === 3 ? 1 : 3);
     }
 
+    const getImage = async(path="Images/geoportal_ortho_r1_c1.png", urlHandler=setImageUrl) => {
+        try {
+            const res = await fetch(`http://localhost:8899/image?path=${path}`).then(res => res.blob())
+            .then(blob => {
+                if(urlHandler === setImageUrl){
+                    setImageBlob(blob);
+                }
+                const url = URL.createObjectURL(blob);
+                urlHandler(url);
+            });;
+        } catch (err) {
+            console.log(err);
+        }
+    }
+
     useEffect(() => {
         const buffer:HTMLElement|null = document.getElementById("printBuffer");
         if(buffer !== null) buffer.scrollTop = buffer?.scrollHeight;
@@ -100,6 +139,10 @@ export const Chat = () => {
             loadConversation(params.chatId);
         }
     }, [params]);
+
+    useEffect(() => {
+        getImage();
+    }, []);
 
     return (
         <ChatWrapper sx={(theme) => ({
@@ -130,9 +173,9 @@ export const Chat = () => {
                             </ChatUserMessage>
                         ) : (
                             <ChatAssistantMessage key={`mess-${ind}`}>
-                                <Typography variant='body1'>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {mess.content}
-                                </Typography>
+                                </ReactMarkdown>
                             </ChatAssistantMessage>
                         ))
                     }
@@ -157,7 +200,11 @@ export const Chat = () => {
                 </ChatUserInputWrapper>
             </ChatSectionContainer>
             <ImageHiding onTrigger={triggerLayoutShift}/>
-            <ImageDisplay showControls={chatSize === 1} />
+            <ImageDisplay 
+                showControls={chatSize === 1} 
+                url={imageUrl}
+                maskUrl={maskUrl}
+            />
         </ChatWrapper>
     )
 }

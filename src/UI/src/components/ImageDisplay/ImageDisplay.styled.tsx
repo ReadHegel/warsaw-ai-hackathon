@@ -15,12 +15,13 @@ export const ImageDisplayImg = styled.img`
     grid-area: 1/1;
     width: 100%;
     height: auto;
+    max-height: calc(70vh - 20px);
 `;
 
 export const ImageWrapper = styled(Stack)<{image: any}>`
     flex: 1;
     min-width: calc(30vw - 20px);
-    max-height: calc(50vh - 20px);
+    max-height: calc(70vh - 20px);
     padding: 10px;
     align-items: center;
     display: grid;

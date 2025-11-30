@@ -1,2 +1,6 @@
 [serve.static]
 env = "BUN_PUBLIC_*"
+[dev]
+proxy = [
+  { from = "/apiAI", to = "http://localhost:8899/" }
+]
