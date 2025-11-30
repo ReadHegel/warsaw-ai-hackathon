@@ -4,7 +4,7 @@ export const Navbar = () => {
     return (<AppBar position="static">
         <Toolbar sx={{gap: 2}}>
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                Wiesio.AI
+                VisSegBud
             </Typography>
             <Button color="inherit" href="/">
                 New chat

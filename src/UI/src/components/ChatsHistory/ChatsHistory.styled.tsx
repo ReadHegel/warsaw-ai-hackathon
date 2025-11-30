@@ -18,7 +18,7 @@ export const ConversationsContainer = styled(Stack)`
 `;
 
 export const ConvWrapper = styled(Stack).attrs({direction: 'row', gap: 2})`
-    width: calc(60vw - 20px);
+    width: calc(40vw - 20px);
     padding: 10px;
     justify-content: space-between;
     background: rgba(255,255,255,.2);
@@ -32,7 +32,8 @@ export const ConvWrapper = styled(Stack).attrs({direction: 'row', gap: 2})`
 `;
 
 export const ConvIndexTypography = styled(Typography)`
-    padding-left: 10px;
+    padding-left: 30px;
+    padding-right: 20px;
 `;
 
 export const ConvTypography = styled(Typography)`
