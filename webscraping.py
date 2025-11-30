@@ -12,7 +12,7 @@ minx, miny, maxx, maxy = 509288.45, 611214.95, 509432.12, 611381.00
 GRID_COLS = 4
 GRID_ROWS = 4
 PIXEL_SIZE_M = 0.03  
-
+ 
 # 1) Split BBOX in map coordinates
 dx = maxx - minx
 dy = maxy - miny
