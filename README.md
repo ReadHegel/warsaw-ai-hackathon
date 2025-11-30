@@ -2,7 +2,7 @@
 
 ## VisSegBud - opis budowy za pomocą sztucznej inteligencji
 
-VisSegBud to program do opisywania i zaznaczania poszczególnych części danego obrazu budowy za pomocą segmentowania obrazu. Dostęp do tej funkcjonalności jest możliwy przez webowy interfejs użytkownika
+VisSegBud to program do opisywania i zaznaczania poszczególnych części danego obszaru budowy za pomocą segmentowania obrazu. Użytkownik, może zapytać bota o dowolną statystykę z placu budowy, która da się wyczytać z zdjęcia z lotu ptaka. Przykładowo jest w stanie policzyć liczbę aut budowlanych obecnych na placu, jest to przykład problemu, który ma rzeczywiste zastosowanie na placach budowy. Pod spodem używamy najnowszych modeli językowych od google, którym dodajemy możliwość przeprowadzania zero-shot detekcji oraz segmentacji zdjęcia placu budowy z lotu ptaka. Wykorzytujemy do tego najnowszy open-source model od Mata, SegmentAnything 3, osiągając bardzo satysfakcjonuje wyniki. 
 
 # jak uruchomić backend
  
